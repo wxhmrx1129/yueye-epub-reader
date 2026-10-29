@@ -10,6 +10,7 @@ files:
   - dist/**/*
   - electron/**/*.cjs
   - build/icon.png
+  - LICENSE
   - package.json
 win:
   target:

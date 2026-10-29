@@ -4,26 +4,19 @@
 
 ## 获取安装程序
 
-本仓库提供源代码，未附带预编译安装包。在 Windows 上安装 Node.js 22.12+（推荐 24 LTS）后，执行：
+**[直接下载 v1.0.0 Windows x64 安装包](https://github.com/wxhmrx1129/yueye-epub-reader/releases/download/v1.0.0/YueyeReader-Setup-1.0.0-x64.exe)**
 
-```powershell
-git clone https://github.com/wxhmrx1129/yueye-epub-reader.git
-cd yueye-epub-reader
-npm ci
-npm run desktop:dist
-```
+下载文件为 `YueyeReader-Setup-1.0.0-x64.exe`。无需安装 Node.js、Git 或其他构建工具，也无需下载 GitHub 自动生成的源代码压缩包。
 
-安装包位于 `release/YueyeReader-Setup-<版本号>-x64.exe`，例如 `YueyeReader-Setup-1.0.0-x64.exe`。这些构建工具仅在生成安装包时需要。
+可在 [v1.0.0 发布页面](https://github.com/wxhmrx1129/yueye-epub-reader/releases/tag/v1.0.0) 查看版本说明和 `SHA256SUMS.txt` 校验文件，或通过 [最新版本页面](https://github.com/wxhmrx1129/yueye-epub-reader/releases/latest) 获取后续版本。
 
 ## 安装与启动
 
-1. 双击生成的安装程序。
+1. 双击下载的 `YueyeReader-Setup-1.0.0-x64.exe`。
 2. 按安装向导选择安装位置并完成安装。
 3. 通过桌面或开始菜单的「阅野」快捷方式打开客户端。
 
-程序文件名为 `YueyeReader.exe`。未配置代码签名的自行构建安装包，Windows 可能显示「未知发布者」，请确认安装包来源可信。
-
-如果只想从源码直接运行，可以执行 `npm ci` 后运行 `npm run desktop`。
+程序文件名为 `YueyeReader.exe`。当前安装包尚未配置代码签名，Windows 可能显示「未知发布者」，请确认文件来自本项目的发布页面。
 
 ## 导入和阅读
 
@@ -78,3 +71,16 @@ npm run desktop:dist
 **关闭时提示保存失败？** 可先选择返回阅读，检查本地存储状态后重试。选择直接退出时，最近尚未保存的修改可能丢失。
 
 **在哪里反馈问题？** 请在 [GitHub Issues](https://github.com/wxhmrx1129/yueye-epub-reader/issues) 说明系统版本、应用版本和复现步骤，避免公开个人图书、阅读记录或凭据。
+
+## 可选：从源码构建
+
+仅需自行修改或生成安装包时，才需要 Node.js 22.12+（推荐 24 LTS）和 Git。在 Windows x64 环境执行：
+
+```powershell
+git clone https://github.com/wxhmrx1129/yueye-epub-reader.git
+cd yueye-epub-reader
+npm ci
+npm run desktop:dist
+```
+
+安装包输出到 `release/YueyeReader-Setup-<版本号>-x64.exe`。如果只想从源码直接运行，可以使用 `npm run desktop`。

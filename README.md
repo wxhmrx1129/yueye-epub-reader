@@ -15,9 +15,13 @@
 
 支持 Windows 10 / 11 x64。
 
-本仓库发布源代码，不附带预编译安装包。可按照下方步骤从源码生成 `YueyeReader-Setup-<版本号>-x64.exe`，然后双击安装，按向导选择安装位置。安装完成后，通过桌面或开始菜单的「阅野」快捷方式启动。
+**[下载 Windows 安装包 · v1.0.0](https://github.com/wxhmrx1129/yueye-epub-reader/releases/download/v1.0.0/YueyeReader-Setup-1.0.0-x64.exe)**
 
-安装好的客户端不需要 Node.js。自行构建且未配置代码签名的安装包，Windows 可能显示「未知发布者」。
+下载后双击 `YueyeReader-Setup-1.0.0-x64.exe`，按向导选择安装位置。安装完成后，通过桌面或开始菜单的「阅野」快捷方式启动。用户无需安装 Node.js、Git 或构建环境。
+
+[版本说明与 SHA-256 校验文件](https://github.com/wxhmrx1129/yueye-epub-reader/releases/tag/v1.0.0) · [查看最新版本](https://github.com/wxhmrx1129/yueye-epub-reader/releases/latest)
+
+当前安装包尚未配置代码签名，Windows 可能显示「未知发布者」。
 
 完整的导入、阅读、数据备份及卸载说明见 [Windows 安装与使用说明](docs/Windows客户端.md)。
 
