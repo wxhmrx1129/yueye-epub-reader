@@ -1,0 +1,22 @@
+.yue-modal {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(85vh, 800px);
+  padding: 0;
+  border: 1px solid var(--border, #dce3d6);
+  border-radius: 18px;
+  color: var(--text, #344535);
+  background: var(--surface, #fafbf7);
+  box-shadow: 0 24px 90px #192e282b;
+  overflow: auto;
+  font-family: inherit;
+}
+.yue-modal::backdrop { background: #182a2459; backdrop-filter: blur(3px); }
+.yue-modal-wide { width: min(660px, calc(100vw - 32px)); }
+.yue-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 23px 25px 19px; border-bottom: 1px solid var(--border, #e4e8de); }
+.yue-modal-header h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .02em; }
+.yue-modal-close { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border: 0; border-radius: 9px; background: transparent; color: inherit; cursor: pointer; }
+.yue-modal-close:hover { background: #7b8c6b19; }
+.yue-modal-close:focus-visible { outline: 2px solid #7b956a; outline-offset: 3px; }
+.yue-modal-body { padding: 24px 25px 27px; }
+@media (max-width: 600px) { .yue-modal-header { padding: 19px 20px 15px; } .yue-modal-body { padding: 20px; } }
