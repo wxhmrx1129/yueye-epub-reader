@@ -94,3 +94,10 @@ test('PDF 窄窗口下设置、侧栏和全屏可用，打开弹窗时键盘不�
   await page.getByRole('button',{name:'收起侧栏',exact:true}).click();await expect(page.locator('.pdf-sidebar')).toHaveCount(0);await page.getByRole('button',{name:'笔记列表',exact:true}).click();await expect(page.locator('.pdf-sidebar')).toBeVisible();await page.getByRole('button',{name:'收起侧栏',exact:true}).click();
   await page.getByRole('button',{name:'进入全屏',exact:true}).click();await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);await page.getByRole('button',{name:'退出全屏',exact:true}).click();await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(false);
 });
+
+test('相邻页渲染失败不阻塞当前页，失败页可改用文字重排并继续翻阅',async({page})=>{
+  await openPdf(page,{oversizedPage:2});await page.getByLabel('PDF 缩放',{exact:true}).selectOption('3');await expect(page.locator('.pdf-loading')).toHaveCount(0);await mode(page,'纵向滚动');
+  await expect(page.locator('.pdf-page-error')).toContainText('页面尺寸过大');await expect(page.locator('.pdf-loading')).toHaveCount(0);await expect(page.locator('[data-pdf-page="1"] canvas')).toBeAttached();
+  await pageNumber(page,'2');await expect(page.locator('.pdf-loading')).toHaveCount(0);await mode(page,'文字重排');await expect(page.locator('[data-pdf-page="2"] .pdf-reflow-content')).toContainText('Yueye PDF - Page 2');await expect(page.locator('.pdf-page-error')).toHaveCount(0);
+  await pageNumber(page,'3');await expect(page.getByLabel('PDF 页码',{exact:true})).toHaveValue('3');await expect(page.locator('.pdf-loading')).toHaveCount(0);
+});

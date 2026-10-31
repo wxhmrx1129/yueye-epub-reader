@@ -1,7 +1,7 @@
 import { deflateSync } from 'node:zlib';
 
 /** Original synthetic test documents, containing no private books or external material. */
-export function makePdf({pages=3,scan=false,password=false,chinese=false}:{pages?:number;scan?:boolean;password?:boolean;chinese?:boolean} = {}):Buffer {
+export function makePdf({pages=3,scan=false,password=false,chinese=false,oversizedPage=0}:{pages?:number;scan?:boolean;password?:boolean;chinese?:boolean;oversizedPage?:number} = {}):Buffer {
   const objects:Buffer[]=[];
   const add=(value:string|Buffer)=>{objects.push(Buffer.isBuffer(value)?value:Buffer.from(value));return objects.length;};
   add('');add('');
@@ -13,7 +13,7 @@ export function makePdf({pages=3,scan=false,password=false,chinese=false}:{pages
     const source=Buffer.from(scan?'q 400 0 0 500 70 100 cm /Photo Do Q':chinese?'BT /F1 24 Tf 60 720 Td <4e2d658796058bfb6d4b8bd5> Tj ET':`BT /F1 24 Tf 60 720 Td (Yueye PDF - Page ${i+1}) Tj 0 -45 Td /F1 12 Tf (Selectable offline reading test.) Tj ET`);
     const compressed=deflateSync(source);
     const content=add(Buffer.concat([Buffer.from(`<< /Length ${compressed.length} /Filter /FlateDecode >>\nstream\n`),compressed,Buffer.from('\nendstream')]));
-    const page=add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${i%2?720:540} 800] /Resources << /Font << /F1 ${font} 0 R >> ${scan?`/XObject << /Photo ${image} 0 R >>`:''} >> /Contents ${content} 0 R >>`);
+    const page=add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${i+1===oversizedPage?50000:i%2?720:540} 800] /Resources << /Font << /F1 ${font} 0 R >> ${scan?`/XObject << /Photo ${image} 0 R >>`:''} >> /Contents ${content} 0 R >>`);
     pageIds.push(page);
   }
   const outline=add('');

@@ -40,7 +40,7 @@ function PdfPage({pdf,number,width,height,zoom,zoomMode,preferences,annotations,
       const availableWidth=Math.min(preferences.contentWidth,Math.max(1,width-48));
       const scale=zoomMode==='custom'?zoom:zoomMode==='width'?Math.max(.05,availableWidth/original.width):Math.max(.05,Math.min(availableWidth/original.width,(height-48)/original.height));
       const viewport=item.getViewport({scale});
-      if(viewport.width>32700||viewport.height>32700)throw new Error('此页面尺寸过大，请降低缩放或选择适合页面。');
+      if(preferences.viewMode==='original'&&(viewport.width>32700||viewport.height>32700))throw new Error('此页面尺寸过大，请降低缩放或选择适合页面。');
       const page=document.createElement('div');page.className='pdf-page';page.dataset.pdfPage=String(number);
       let reduced=false,hasText=false;
       if(preferences.viewMode==='text'){
@@ -95,7 +95,7 @@ function PdfPage({pdf,number,width,height,zoom,zoomMode,preferences,annotations,
       paintPdfAnnotations(page,notes.current,preferences.viewMode==='text');
       setRevision(value=>value+1);
       lifecycle.onReady(number,{width:page.getBoundingClientRect().width,height:page.getBoundingClientRect().height},{hasText,reduced});
-    })().catch(error=>{if(active){const message=error instanceof Error?error.message:'PDF 页面渲染失败';setError(message);callbacks.current.onError(number,message);}});
+    })().catch(error=>{if(active){const message=error instanceof Error?error.message:'PDF 页面渲染失败';setError(message);lifecycle.onError(number,message);}});
     return()=>{active=false;render?.cancel();text?.cancel();current?.cleanup();if(canvas)canvas.width=canvas.height=0;wrapper.current=null;};
   },[pdf,number,width,height,zoom,zoomMode,preferences.viewMode,preferences.fontSize,preferences.contentWidth,preferences.fontFamily,preferences.lineHeight,retry]);
   useEffect(()=>{if(wrapper.current)paintPdfAnnotations(wrapper.current,annotations,preferences.viewMode==='text');},[annotations,revision,preferences.viewMode]);
@@ -123,6 +123,7 @@ export function PdfDocumentView(props:Props) {
   const {pdf,page,navigation,zoom,zoomMode,preferences,initialProgress,annotations,regionMode}=props;
   const host=useRef<HTMLElement>(null),slots=useRef(new Map<number,HTMLDivElement>());
   const sizes=useRef(new Map<number,{width:number;height:number;key:string}>()),ready=useRef(new Map<number,{key:string;info:{hasText:boolean;reduced:boolean}}>());
+  const failed=useRef(new Map<number,string>());
   const current=useRef(page),position=useRef<PdfViewPosition>({page,offsetX:initialProgress?.offsetX??0,offsetY:initialProgress?.offsetY??0});
   const callbacks=useRef(props);callbacks.current=props;
   const [size,setSize]=useState({width:800,height:700}),[layout,setLayout]=useState(0);
@@ -157,7 +158,8 @@ export function PdfDocumentView(props:Props) {
       }
     }
     const neighbors=continuous?[target.page-1,target.page,target.page+1].filter(value=>value>=1&&value<=pdf.document.numPages):[target.page];
-    if(neighbors.every(isReady)){pending.current=null;publish(target.page);}
+    if(failed.current.get(target.page)===renderKey){pending.current=null;callbacks.current.onLoading(false);}
+    else if(neighbors.every(number=>isReady(number)||failed.current.get(number)===renderKey)){pending.current=null;publish(target.page);}
   }
   useEffect(()=>{
     const area=host.current!;
@@ -207,8 +209,8 @@ export function PdfDocumentView(props:Props) {
       return <div key={number} ref={element=>{if(element)slots.current.set(number,element);else slots.current.delete(number);}} className="pdf-page-slot" data-page-slot={number} style={{width:measured.width,minHeight:measured.height}}>
         {near?<PdfPage pdf={pdf} number={number} width={size.width} height={size.height} zoom={zoom} zoomMode={zoomMode} preferences={preferences} annotations={annotations.filter(note=>note.page===number)} regionMode={regionMode}
           onDestination={target=>callbacks.current.onDestination(target)} onSelection={value=>callbacks.current.onSelection(value)}
-          onLoading={value=>{ready.current.delete(value);if(value===current.current)callbacks.current.onLoading(true);}}
-          onError={(value,message)=>{if(value===current.current){pending.current=null;callbacks.current.onLoading(false);}callbacks.current.onError(message);}}
+          onLoading={value=>{ready.current.delete(value);failed.current.delete(value);if(value===current.current)callbacks.current.onLoading(true);}}
+          onError={(value,message)=>{failed.current.set(value,renderKey);setLayout(old=>old+1);if(value===current.current){pending.current=null;callbacks.current.onLoading(false);}callbacks.current.onError(message);}}
           onReady={(value,measured,info)=>{if(continuous&&!pending.current)pending.current={...position.current};sizes.current.set(value,{...measured,key:renderKey});ready.current.set(value,{key:renderKey,info});const slot=slots.current.get(value);if(slot){slot.style.width=`${measured.width}px`;slot.style.minHeight=`${measured.height}px`;}setLayout(old=>old+1);if(value===current.current&&!pending.current)publish(value);}}
         />:<div className="pdf-page-placeholder" aria-hidden="true">第 {number} 页</div>}
       </div>;
