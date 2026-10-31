@@ -114,6 +114,25 @@ test('完整界面：目录、设置、书签、笔记、刷新续读和移除�
   expect((await persisted(page)).preferences.fontSize).toBe(28);
 });
 
+test('编辑页码时后台位置更新保留草稿，提交后实际翻页并保存', async ({ page }) => {
+  await importAndOpen(page);
+  const input = page.getByLabel('跳转页码', { exact: true });
+  const before = (await persisted(page)).progress;
+  await input.fill('5');
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[title="书籍正文"]')!;
+    frame.contentWindow!.dispatchEvent(new Event('scroll'));
+  });
+  await expect.poll(async () => (await persisted(page)).progress.updatedAt).toBeGreaterThan(before.updatedAt);
+  await expect(input).toHaveValue('5');
+  await input.press('Enter');
+  await input.blur();
+  await expect(input).toHaveValue('5');
+  await expect.poll(async () => (await persisted(page)).progress.cfi).not.toBe(before.cfi);
+  await page.reload();
+  await expect(input).toHaveValue('5');
+});
+
 test('页码校验、输入焦点、全屏及滚动模式可以正常使用', async ({ page }) => {
   await importAndOpen(page);
   const input = page.getByLabel('跳转页码', { exact: true });

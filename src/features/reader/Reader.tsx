@@ -43,6 +43,7 @@ export function Reader({book,parsed,initialProgress,preferences,onPreferences,on
   const [bookmarks,setBookmarks]=useState<Bookmark[]>([]),[notes,setNotes]=useState<Annotation[]>([]);
   const [pages,setPages]=useState<PageEntry[]|null>(null),[indexCount,setIndexCount]=useState([0,parsed.chapters.length]);
   const [pageInput,setPageInput]=useState(''),[pageError,setPageError]=useState('');
+  const pageInputDirty=useRef(false);
   const [settings,setSettings]=useState(false),[full,setFull]=useState(false),[loading,setLoading]=useState(true);
   const [selection,setSelection]=useState<TextSelection|null>(null);
   const [editor,setEditor]=useState<{existing?:Annotation;selection?:TextSelection}|null>(null);
@@ -75,7 +76,8 @@ export function Reader({book,parsed,initialProgress,preferences,onPreferences,on
     const reader=new ReaderAdapter(host.current!,parsed,prefsRef.current,{
       position:value=>{
         if(!active)return;currentPosition.current=value;setPosition(value);setLoading(false);
-        setPageInput(value.page?String(value.page):'');setSaveState('待保存');clearTimeout(saveTimer.current);
+        if(!pageInputDirty.current)setPageInput(value.page?String(value.page):'');
+        setSaveState('待保存');clearTimeout(saveTimer.current);
         saveTimer.current=setTimeout(()=>{void persistRef.current().catch(error=>callbacks.current.onError(error instanceof Error?error.message:'进度保存失败'));},350);
       },
       index:(value,done,total)=>{if(active){setPages(value);setIndexCount([done,total]);}},
@@ -118,6 +120,7 @@ export function Reader({book,parsed,initialProgress,preferences,onPreferences,on
   async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else if(root.current?.requestFullscreen)await root.current.requestFullscreen();else onError('当前环境不支持阅读全屏，请尝试最大化窗口。');}catch{onError('未能进入全屏，请重试或最大化窗口。');}}
   function showTab(next:typeof tab){if(tab===next&&preferences.sidebarOpen)updatePrefs({sidebarOpen:false});else{setTab(next);updatePrefs({sidebarOpen:true});}}
   function go(target:string,quote?:string){run(adapter.current?.goTo(target,quote));if(window.innerWidth<1024)updatePrefs({sidebarOpen:false});}
+  function resetPageInput(){pageInputDirty.current=false;setPageInput(currentPosition.current?.page?String(currentPosition.current.page):'');setPageError('');}
   async function toggleBookmark(){
     if(!position)return;
     const old=bookmarks.find(b=>b.cfi===position.cfi);
@@ -162,8 +165,8 @@ export function Reader({book,parsed,initialProgress,preferences,onPreferences,on
       <div className="toolbar-section width-control"><span className="toolbar-caption">宽度</span><Tool label="减小宽度" disabled={preferences.contentWidth<=480} onClick={()=>updatePrefs({contentWidth:preferences.contentWidth-20})}><Minus size={14}/></Tool><NumericSetting label="正文宽度" min={480} max={1400} step={20} value={preferences.contentWidth} onCommit={value=>updatePrefs({contentWidth:value})}/><Tool label="增大宽度" disabled={preferences.contentWidth>=1400} onClick={()=>updatePrefs({contentWidth:preferences.contentWidth+20})}><Plus size={14}/></Tool></div>
       <div className="toolbar-section page-control">
         <Tool label="上一页" disabled={loading} onClick={()=>run(adapter.current?.previous())}><ChevronLeft size={18}/></Tool>
-        {preferences.readingMode==='paginated'?<form onSubmit={e=>{e.preventDefault();if(!/^\d+$/.test(pageInput)||Number(pageInput)<1||Number(pageInput)>(pages?.length??0)){setPageError(`请输入 1–${pages?.length??0} 之间的整数页码`);return;}setPageError('');run(adapter.current?.goToPage(Number(pageInput)));}}>
-          <input aria-label="跳转页码" title="输入页码后按 Enter，页码随排版变化" inputMode="numeric" disabled={!pages} value={pageInput} placeholder="—" onChange={e=>{setPageInput(e.target.value);setPageError('');}}/><span className="page-total">/ {pages?.length??'—'}</span>
+        {preferences.readingMode==='paginated'?<form onSubmit={e=>{e.preventDefault();if(!/^\d+$/.test(pageInput)||Number(pageInput)<1||Number(pageInput)>(pages?.length??0)){setPageError(`请输入 1–${pages?.length??0} 之间的整数页码`);return;}pageInputDirty.current=false;setPageError('');run(adapter.current?.goToPage(Number(pageInput)));}}>
+          <input aria-label="跳转页码" title="输入页码后按 Enter，页码随排版变化" inputMode="numeric" disabled={!pages} value={pageInput} placeholder="—" onChange={e=>{pageInputDirty.current=true;setPageInput(e.target.value);setPageError('');}} onBlur={resetPageInput} onKeyDown={e=>{if(e.key==='Escape')resetPageInput();}}/><span className="page-total">/ {pages?.length??'—'}</span>
         </form>:<span className="scroll-mode-label">滚动阅读</span>}
         <Tool label="下一页" disabled={loading} onClick={()=>run(adapter.current?.next())}><ChevronRight size={18}/></Tool>
         {pageError&&<div className="page-error" role="alert">{pageError}</div>}
