@@ -223,3 +223,4 @@
   .shelf-content { padding: 0 19px; }
 }
 @media (prefers-reduced-motion: reduce) { .shelf-app *, .shelf-app *::before, .shelf-app *::after { transition: none !important; animation-duration: .01ms !important; } }
+.shelf-format-badge{display:inline-block;font-size:9px;letter-spacing:1px;border:1px solid #cfdac8;color:#718569;padding:2px 5px;border-radius:3px;margin:2px 0 5px}.shelf-import-task{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:70;max-width:90vw;display:flex;align-items:center;gap:18px;background:#f7f9f3;padding:15px 20px;border:1px solid #cedbc3;border-radius:9px;box-shadow:0 5px 25px #0002;font-size:12px}.shelf-import-task span{overflow-wrap:anywhere}

@@ -3,6 +3,7 @@ productName: 阅野
 executableName: YueyeReader
 asar: true
 npmRebuild: false
+electronDist: node_modules/electron/dist
 directories:
   output: release
   buildResources: build
@@ -25,7 +26,7 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 阅野
-  uninstallDisplayName: 阅野 EPUB 阅读器
+  uninstallDisplayName: 阅野 EPUB / PDF 阅读器
   deleteAppDataOnUninstall: false
   installerLanguages: [zh_CN, en_US]
   language: '2052'

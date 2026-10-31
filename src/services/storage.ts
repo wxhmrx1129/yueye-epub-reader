@@ -1,7 +1,8 @@
 import Dexie, { type Table } from 'dexie';
 import { DEFAULT_PREFERENCES, normalizePreferences } from '../preferences';
-import type { Annotation, BookRecord, Bookmark, PageIndex, Preferences, ReadingProgress } from '../types';
-import { EPUB_LIMITS, parseEpub, readBlobBytes } from './epub/import';
+import type { Annotation, BookRecord, Bookmark, PageIndex, Preferences, ReadingProgress, PdfProgress, PdfBookmark } from '../types';
+import { parseEpub, readBlobBytes } from './epub/import';
+import { checkCancelled, validateFileSize, type TaskOptions } from './tasks';
 
 interface BookFile { bookId: string; blob: Blob }
 class ReaderDatabase extends Dexie {
@@ -12,6 +13,8 @@ class ReaderDatabase extends Dexie {
   annotations!: Table<Annotation,string>;
   preferences!: Table<Preferences,string>;
   readerIndexes!: Table<PageIndex,string>;
+  pdfProgress!: Table<PdfProgress,string>;
+  pdfBookmarks!: Table<PdfBookmark,string>;
   constructor() {
     super('yueye-reader');
     this.version(1).stores({
@@ -20,6 +23,10 @@ class ReaderDatabase extends Dexie {
       bookmarks:'id,bookId,[bookId+cfi]', annotations:'id,bookId,updatedAt',
       preferences:'id', readerIndexes:'id,bookId,&[bookId+signature]',
     });
+    this.version(2).stores({
+      books:'id,&fileHash,lastReadAt,importedAt,title,format',
+      pdfProgress:'bookId', pdfBookmarks:'id,bookId,&[bookId+page]',
+    }).upgrade(transaction=>transaction.table('books').toCollection().modify(book=>{book.format??='epub';}));
   }
 }
 export const db = new ReaderDatabase();
@@ -35,25 +42,32 @@ export async function getBookFile(id:string):Promise<Blob> {
   if (!record) throw new Error('找不到原书文件，可能已被移除。请重新导入。');
   return record.blob;
 }
-export async function importBook(file:File):Promise<{book:BookRecord;duplicate:boolean}> {
-  if (!/\.epub$/i.test(file.name)) throw new Error('请选择 .epub 格式的图书。');
-  if (file.size > EPUB_LIMITS.archive) throw new Error('文件超过 50MiB 限制，请选择较小的 EPUB。');
+export async function importBook(file:File, options:TaskOptions = {}):Promise<{book:BookRecord;duplicate:boolean}> {
+  const format = /\.pdf$/i.test(file.name) ? 'pdf' : /\.epub$/i.test(file.name) ? 'epub' : undefined;
+  if (!format) throw new Error('请选择 .epub 或 .pdf 格式的图书。');
+  validateFileSize(file.size); checkCancelled(options.signal); options.onStage?.('读取文件与检查重复');
   const bytes = await readBlobBytes(file);
+  checkCancelled(options.signal);
   const digest = await crypto.subtle.digest('SHA-256',bytes.buffer as ArrayBuffer);
+  checkCancelled(options.signal);
   const fileHash = Array.from(new Uint8Array(digest), byte=>byte.toString(16).padStart(2,'0')).join('');
   const existing = await db.books.where('fileHash').equals(fileHash).first();
   if (existing) return {book:existing,duplicate:true};
-  const parsed = await parseEpub(file,file.name);
+  const parsed = format==='pdf'
+    ? await (await import('./pdf/document')).openPdf(file,file.name,{...options,bytes,cover:true})
+    : await parseEpub(file,file.name,{...options,bytes,lazy:true});
+  const pdf = 'document' in parsed ? parsed : undefined;
   const now = Date.now();
   const book:BookRecord = {
     id:crypto.randomUUID(),fileHash,title:parsed.title,author:parsed.author,language:parsed.language,
-    originalFileName:file.name,fileSize:file.size,epubVersion:parsed.version,
+    originalFileName:file.name,fileSize:file.size,format,epubVersion:'version' in parsed?parsed.version:'',pageCount:pdf?.document.numPages,
     importedAt:now,lastReadAt:0,progression:0,chapterTitle:'',isFinished:false,coverBlob:parsed.coverBlob,
   };
   try {
+    checkCancelled(options.signal); options.onStage?.('正在完成保存（此阶段等待提交完成）');
     await db.transaction('rw',db.books,db.bookFiles,async()=>{
       await db.books.add(book);
-      await db.bookFiles.add({bookId:book.id,blob:new Blob([bytes.buffer as ArrayBuffer],{type:'application/epub+zip'})});
+      await db.bookFiles.add({bookId:book.id,blob:new Blob([file],{type:format==='pdf'?'application/pdf':'application/epub+zip'})});
     });
     return {book,duplicate:false};
   } catch (error) {
@@ -63,16 +77,37 @@ export async function importBook(file:File):Promise<{book:BookRecord;duplicate:b
       if (duplicate) return {book:duplicate,duplicate:true};
     }
     throw error;
-  }
+  } finally { await parsed.dispose?.(); }
 }
 export async function removeBook(id:string) {
-  await db.transaction('rw',[db.books,db.bookFiles,db.readingProgress,db.bookmarks,db.annotations,db.readerIndexes],async()=>{
+  await db.transaction('rw',[db.books,db.bookFiles,db.readingProgress,db.bookmarks,db.annotations,db.readerIndexes,db.pdfProgress,db.pdfBookmarks],async()=>{
     await db.books.delete(id); await db.bookFiles.delete(id); await db.readingProgress.delete(id);
     await db.bookmarks.where('bookId').equals(id).delete();
     await db.annotations.where('bookId').equals(id).delete();
     await db.readerIndexes.where('bookId').equals(id).delete();
+    await db.pdfProgress.delete(id); await db.pdfBookmarks.where('bookId').equals(id).delete();
   });
 }
+export function getPdfProgress(id:string) { return db.pdfProgress.get(id); }
+export async function savePdfProgress(progress:PdfProgress) {
+  await db.transaction('rw',db.books,db.pdfProgress,async()=>{
+    if (!await db.books.get(progress.bookId)) throw new Error('图书已被移除，无法保存阅读位置。');
+    const previous = await db.pdfProgress.get(progress.bookId);
+    if (previous && previous.updatedAt > progress.updatedAt) return;
+    const normalized = {...progress,progression:Math.min(1,Math.max(0,progress.progression))};
+    await db.pdfProgress.put(normalized);
+    await db.books.update(progress.bookId,{lastReadAt:progress.updatedAt,progression:normalized.progression,chapterTitle:progress.chapterTitle,isFinished:progress.isFinished});
+  });
+}
+export async function listPdfBookmarks(bookId:string) { return (await db.pdfBookmarks.where('bookId').equals(bookId).toArray()).sort((a,b)=>a.page-b.page); }
+export async function putPdfBookmark(mark:PdfBookmark) {
+  await db.transaction('rw',db.books,db.pdfBookmarks,async()=>{
+    if (!await db.books.get(mark.bookId)) throw new Error('图书已被移除，无法保存书签。');
+    const existing = await db.pdfBookmarks.where('[bookId+page]').equals([mark.bookId,mark.page]).first();
+    if (!existing) await db.pdfBookmarks.add(mark);
+  });
+}
+export async function deletePdfBookmark(id:string) { await db.pdfBookmarks.delete(id); }
 export function getProgress(id:string) { return db.readingProgress.get(id); }
 export async function saveProgress(progress:ReadingProgress) {
   await db.transaction('rw',db.books,db.readingProgress,async()=>{

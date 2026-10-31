@@ -34,7 +34,7 @@ async function launch() {
   page = await application.firstWindow({ timeout: 30_000 });
   page.setDefaultTimeout(15_000);
   page.on('pageerror', error => errors.push(error.message));
-  await expect(page.getByLabel('选择 EPUB 图书')).toBeAttached();
+  await expect(page.getByLabel('选择 EPUB 或 PDF 图书')).toBeAttached();
   assert.equal(new URL(page.url()).protocol, 'yueye:');
   assert.equal(new URL(page.url()).host, 'app');
 }

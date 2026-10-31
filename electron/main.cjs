@@ -24,6 +24,7 @@ const mimeTypes = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2',
   '.epub': 'application/epub+zip',
+  '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.pdf': 'application/pdf',
 };
 let mainWindow;
 let closeRequest;
@@ -83,7 +84,7 @@ async function closeFailed(message) {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440, height: 960, minWidth: 760, minHeight: 560,
-    title: '阅野 · EPUB 阅读器', backgroundColor: '#edf2e9', show: false,
+    title: '阅野 · EPUB / PDF 阅读器', backgroundColor: '#edf2e9', show: false,
     icon: path.join(app.getAppPath(), 'build', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {

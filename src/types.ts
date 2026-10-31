@@ -5,6 +5,7 @@ export interface Preferences {
   lineHeight: number; readingMode: 'paginated' | 'scrolled'; sidebarOpen: boolean;
 }
 export interface BookRecord {
+  format?: 'epub' | 'pdf'; pageCount?: number;
   id: string; fileHash: string; title: string; author: string; language: string;
   originalFileName: string; fileSize: number; epubVersion: string;
   importedAt: number; lastReadAt: number; progression: number;
@@ -13,6 +14,9 @@ export interface BookRecord {
 export interface TocItem { id: string; label: string; href: string; children: TocItem[] }
 export interface Chapter { id: string; href: string; title: string; cfiBase: string; html: string }
 export interface ParsedBook {
+  loadChapter?: (index: number) => Promise<Chapter>;
+  releaseChapter?: (index: number) => void;
+  dispose?: () => void;
   title: string; author: string; language: string; version: string;
   chapters: Chapter[]; toc: TocItem[]; coverBlob?: Blob;
 }
@@ -38,3 +42,9 @@ export interface TextSelection {
 }
 export interface PageEntry { chapter: number; localPage: number; cfi: string }
 export interface PageIndex { id: string; bookId: string; signature: string; pages: PageEntry[] }
+export interface PdfProgress {
+  format: 'pdf'; bookId: string; page: number; totalPages: number;
+  offsetX: number; offsetY: number; zoom: number; zoomMode: 'page' | 'width' | 'custom';
+  progression: number; chapterTitle: string; isFinished: boolean; updatedAt: number;
+}
+export interface PdfBookmark { id: string; bookId: string; page: number; createdAt: number }

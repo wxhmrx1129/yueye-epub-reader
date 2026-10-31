@@ -1,7 +1,7 @@
 {
   "name": "yueye-epub-reader",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
@@ -13,7 +13,10 @@
     "desktop:dev": "node scripts/desktop-dev.mjs",
     "desktop:pack": "npm run build && electron-builder --win --x64 --dir",
     "desktop:dist": "npm run build && electron-builder --win nsis --x64",
-    "test:desktop": "npm run build && node --test tests/desktop-policy.test.cjs && node scripts/test-desktop.mjs"
+    "test:desktop": "npm run build && node --test tests/desktop-policy.test.cjs && node scripts/test-desktop.mjs",
+    "predev": "node scripts/prepare-pdf-assets.mjs",
+    "prebuild": "node scripts/prepare-pdf-assets.mjs",
+    "test:desktop:v11": "npm run build && node scripts/test-v11-desktop.mjs"
   },
   "dependencies": {
     "dexie": "^4.2.1",
@@ -21,6 +24,7 @@
     "epubjs": "^0.3.93",
     "fflate": "^0.8.2",
     "lucide-react": "^0.468.0",
+    "pdfjs-dist": "6.4.299",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
@@ -41,7 +45,7 @@
   "overrides": {
     "@xmldom/xmldom": "0.9.12"
   },
-  "description": "阅野 · 本地 EPUB 阅读器 Windows 客户端",
+  "description": "阅野 · 本地 EPUB / PDF 阅读器 Windows 客户端",
   "author": "Yueye Reader",
   "main": "electron/main.cjs",
   "license": "MIT",

@@ -12,11 +12,12 @@ export interface LibraryProps {
   importing: boolean;
   importStatus?: string;
   onDemo?: () => void;
+  onCancelImport?: () => void;
 }
 
 function percentage(book: BookRecord) { return Math.min(100, Math.max(0, Math.round(book.progression * 100))); }
 function statusFor(book: BookRecord) { return book.isFinished ? '已读完' : book.lastReadAt ? `已读 ${percentage(book)}%` : '未开始'; }
-function humanSize(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }
+function humanSize(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KiB` : `${(bytes / (1024 * 1024)).toFixed(3)} MiB`; }
 function dateLabel(date: number) {
   if (!date) return '还没开始的故事';
   const days = Math.floor((Date.now() - date) / 86400000);
@@ -68,7 +69,7 @@ function QuietBooks() {
   </svg>;
 }
 
-export function Library({ books, onOpen, onImport, onRemove, importing, importStatus, onDemo }: LibraryProps) {
+export function Library({ books, onOpen, onImport, onRemove, importing, importStatus, onDemo, onCancelImport }: LibraryProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const [dragging, setDragging] = useState(false);
@@ -95,7 +96,7 @@ export function Library({ books, onOpen, onImport, onRemove, importing, importSt
       onDragLeave={event => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); }}
       onDrop={event => { event.preventDefault(); dragDepth.current = 0; setDragging(false); if (!importing && event.dataTransfer.files.length) onImport(Array.from(event.dataTransfer.files)); }}
     >
-      <input ref={fileInput} type="file" accept=".epub,application/epub+zip" multiple aria-label="选择 EPUB 图书" className="shelf-file-input"
+      <input ref={fileInput} type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple aria-label="选择 EPUB 或 PDF 图书" className="shelf-file-input"
         onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length) onImport(files); }} />
 
       <aside className="shelf-sidebar">
@@ -153,9 +154,9 @@ export function Library({ books, onOpen, onImport, onRemove, importing, importSt
             {!books.length ? <div className="shelf-empty">
               <div className="shelf-empty-icon"><BookOpen size={32} strokeWidth={1.25} /><span><Plus size={13} /></span></div>
               <h3>你的下一段旅程，从一本书开始</h3>
-              <p>将 EPUB 文件拖到这里，或从电脑中选择图书</p>
+              <p>将 EPUB / PDF 文件拖到这里，或从电脑中选择图书</p>
               <button type="button" className="shelf-import-button shelf-empty-import" onClick={openFiles} disabled={importing}>{importing ? <LoaderCircle size={17} className="shelf-spin" /> : <Upload size={17} />}{importing ? '正在导入书籍…' : '导入第一本书'}</button>
-              <span className="shelf-empty-hint">支持 EPUB 2 / EPUB 3 · 可一次导入多本</span>
+              <span className="shelf-empty-hint">支持 EPUB 2 / EPUB 3 / PDF · 每本最高 150MiB · 可一次导入多本</span>
               {onDemo && <div className="shelf-demo"><span>还没有准备好书籍？</span><button type="button" onClick={onDemo} disabled={importing}><Sparkles size={14} /> 先读一本示例书 <ArrowRight size={13} /></button></div>}
             </div> : !sorted.length ? <div className="shelf-no-results"><Search size={30} strokeWidth={1.3} /><h3>没有找到相关图书</h3><p>试试其他书名或作者，或者导入一本新书。</p><button type="button" onClick={() => setQuery('')}>查看全部藏书</button></div> :
               <div className="shelf-book-grid">
@@ -172,10 +173,11 @@ export function Library({ books, onOpen, onImport, onRemove, importing, importSt
                     </details>
                   </div>
                   <p className="shelf-book-author" title={book.author}>{book.author || '未知作者'}</p>
+                  <span className="shelf-format-badge">{book.format==='pdf'?'PDF':'EPUB'}</span>
                   <div className="shelf-book-progress"><span className="shelf-progress-track"><span style={{ width: `${percentage(book)}%` }} /></span><span>{statusFor(book)}</span></div>
                   <div className="shelf-book-date">{dateLabel(book.lastReadAt)}</div>
                 </article>)}
-                {!query && <button type="button" className="shelf-add-book" onClick={openFiles} disabled={importing}><span className="shelf-add-book-frame"><Plus size={25} strokeWidth={1.3} /><span>再添一本好书</span></span><span>导入 EPUB 图书</span></button>}
+                {!query && <button type="button" className="shelf-add-book" onClick={openFiles} disabled={importing}><span className="shelf-add-book-frame"><Plus size={25} strokeWidth={1.3} /><span>再添一本好书</span></span><span>导入 EPUB / PDF 图书</span></button>}
               </div>}
           </section>
 
@@ -183,9 +185,10 @@ export function Library({ books, onOpen, onImport, onRemove, importing, importSt
         </div>
       </main>
 
-      {dragging && <div className="shelf-drop-overlay" aria-live="polite"><div><FileUp size={48} strokeWidth={1.2} /><h2>{importing ? '请等待当前导入完成' : '把书放在这里'}</h2><p>{importing ? '很快就可以继续添加图书' : '松开鼠标，将 EPUB 收藏到你的书架'}</p></div></div>}
+      {dragging && <div className="shelf-drop-overlay" aria-live="polite"><div><FileUp size={48} strokeWidth={1.2} /><h2>{importing ? '请等待当前导入完成' : '把书放在这里'}</h2><p>{importing ? '很快就可以继续添加图书' : '松开鼠标，将 EPUB / PDF 收藏到你的书架'}</p></div></div>}
 
-      {information && <Modal title="图书信息" onClose={() => setInformation(null)}><div className="shelf-book-information"><h3>{information.title}</h3><p>{information.author || '未知作者'}</p><dl><dt>文件名称</dt><dd>{information.originalFileName}</dd><dt>文件大小</dt><dd>{humanSize(information.fileSize)}</dd><dt>图书格式</dt><dd>EPUB {information.epubVersion}</dd><dt>语言</dt><dd>{information.language || '未标注'}</dd><dt>导入时间</dt><dd>{new Date(information.importedAt).toLocaleString('zh-CN')}</dd><dt>阅读进度</dt><dd>{statusFor(information)}</dd></dl><div className="shelf-information-note"><ShieldCheck size={15} />这本书与阅读记录仅保存在本机。</div></div></Modal>}
+      {importing&&<div className="shelf-import-task" role="status"><span>{importStatus}</span><button className="app-secondary" onClick={onCancelImport}>取消导入</button></div>}
+      {information && <Modal title="图书信息" onClose={() => setInformation(null)}><div className="shelf-book-information"><h3>{information.title}</h3><p>{information.author || '未知作者'}</p><dl><dt>文件名称</dt><dd>{information.originalFileName}</dd><dt>文件大小</dt><dd>{humanSize(information.fileSize)}</dd><dt>图书格式</dt><dd>{information.format==='pdf'?`PDF · ${information.pageCount??'—'} 页`:`EPUB ${information.epubVersion}`}</dd><dt>语言</dt><dd>{information.language || '未标注'}</dd><dt>导入时间</dt><dd>{new Date(information.importedAt).toLocaleString('zh-CN')}</dd><dt>阅读进度</dt><dd>{statusFor(information)}</dd></dl><div className="shelf-information-note"><ShieldCheck size={15} />这本书与阅读记录仅保存在本机。</div></div></Modal>}
     </div>
   );
 }

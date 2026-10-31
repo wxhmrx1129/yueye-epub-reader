@@ -7,7 +7,7 @@ const firstChapter = '第一章 · 把清晨还给自己';
 
 async function importAndOpen(page: Page) {
   await page.goto('/');
-  await page.getByLabel('选择 EPUB 图书').setInputFiles(resolve('tests/fixtures/epub3.epub'));
+  await page.getByLabel('选择 EPUB 或 PDF 图书').setInputFiles(resolve('tests/fixtures/epub3.epub'));
   await page.getByRole('button', { name: `打开《${title}》`, exact: true }).click();
   await expect(page.getByLabel('跳转页码', { exact: true })).toBeEnabled();
   await expect(page.locator('iframe[title="书籍正文"]')).toBeVisible();

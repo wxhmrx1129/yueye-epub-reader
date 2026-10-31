@@ -1,8 +1,11 @@
 import DOMPurify from 'dompurify';
 import { strFromU8, unzipSync } from 'fflate';
 import type { Chapter, ParsedBook, TocItem } from '../../types';
+import { openArchive } from './archive';
+import { validateImagePixels } from './image-limits';
+import { checkCancelled, FILE_LIMIT, validateFileSize, type TaskOptions } from '../tasks';
 
-export const EPUB_LIMITS = { archive: 50 * 1024 ** 2, unpacked: 250 * 1024 ** 2, resource: 50 * 1024 ** 2, entries: 10000, expanded: 250 * 1024 ** 2, stylesheet: 16 * 1024 ** 2 };
+export const EPUB_LIMITS = { archive: FILE_LIMIT, unpacked: 750 * 1024 ** 2, resource: 50 * 1024 ** 2, entries: 10000, expanded: 250 * 1024 ** 2, stylesheet: 16 * 1024 ** 2 };
 const MIME: Record<string, string> = { jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',webp:'image/webp',svg:'image/svg+xml',avif:'image/avif',css:'text/css',woff:'font/woff',woff2:'font/woff2',ttf:'font/ttf',otf:'font/otf',xhtml:'application/xhtml+xml',html:'text/html' };
 const CSP = "default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; style-src 'unsafe-inline' data: blob:; img-src data: blob:; font-src data: blob:; media-src 'none'";
 type ManifestItem = { id: string; href: string; media: string; properties: string[] };
@@ -72,7 +75,7 @@ function inspectZip(bytes: Uint8Array) {
     names.add(name);
     if (size > EPUB_LIMITS.resource) fail('单项书籍资源超过 50MiB 限制。');
     total += size;
-    if (total > EPUB_LIMITS.unpacked) fail('书籍解压后超过 250MiB 限制。');
+    if (total > EPUB_LIMITS.unpacked) fail('书籍解压后超过 750MiB 安全限制。');
     offset = next;
   }
   return names;
@@ -88,27 +91,50 @@ function safeDataResource(value: string) {
   return /^data:(?:image\/(?:png|jpeg|gif|webp|avif)|font\/(?:woff2?|ttf|otf)|application\/(?:font-woff|x-font-ttf|x-font-opentype));base64,[a-z0-9+/=\r\n]+$/i.test(value);
 }
 
-export async function parseEpub(blob: Blob, originalFileName = '未命名.epub'): Promise<ParsedBook> {
-  if (blob.size > EPUB_LIMITS.archive) fail('文件超过 50MiB 限制，请选择较小的 EPUB。');
-  const bytes = await readBlobBytes(blob);
+export async function parseEpub(blob: Blob, originalFileName = '未命名.epub', options: TaskOptions & {lazy?:boolean; bytes?:Uint8Array} = {}): Promise<ParsedBook> {
+  validateFileSize(blob.size); checkCancelled(options.signal);
+  options.onStage?.('校验 EPUB 结构');
+  const bytes = options.bytes ?? await readBlobBytes(blob);
+  checkCancelled(options.signal);
   const zipNames = inspectZip(bytes);
-  let files: Record<string, Uint8Array>;
+  const archive = options.lazy ? openArchive(bytes,EPUB_LIMITS.resource,EPUB_LIMITS.unpacked,options.signal) : undefined;
+  let files: Record<string, Uint8Array> = {};
+  const objectUrls = new Set<string>();
+  const fontKeys = new Map<string,{key:Uint8Array;length:number}>();
+  let releaseResources=()=>{};
+  const dispose = () => { archive?.dispose(); for (const url of objectUrls) URL.revokeObjectURL(url); objectUrls.clear(); fontKeys.clear();files = {};releaseResources(); };
+  try {
+  async function ensure(paths: string[]) {
+    checkCancelled(options.signal);
+    const missing = [...new Set(paths.map(withoutFragment))].filter(path => zipNames.has(path) && !files[path]);
+    if (missing.length && archive) {
+      const loaded=await archive.read(missing);
+      for(const [path,data] of Object.entries(loaded)) {
+        const mask=fontKeys.get(path);
+        if(mask)for(let i=0;i<Math.min(data.length,mask.length);i++)data[i]^=mask.key[i%mask.key.length];
+      }
+      Object.assign(files,loaded);
+    }
+    checkCancelled(options.signal);
+  }
   try {
     let declaredTotal = 0;
-    files = unzipSync(bytes, { filter: entry => {
+    if (!archive) files = unzipSync(bytes, { filter: entry => {
       if (!zipNames.has(entry.name) || entry.originalSize > EPUB_LIMITS.resource) fail('EPUB 资源目录与实际内容不一致。');
       declaredTotal += entry.originalSize;
-      if (declaredTotal > EPUB_LIMITS.unpacked) fail('书籍解压后超过 250MiB 限制。');
+      if (declaredTotal > EPUB_LIMITS.unpacked) fail('书籍解压后超过 750MiB 安全限制。');
       return !entry.name.endsWith('/');
     } });
   } catch (error) { fail(error instanceof Error && /限制|不一致/.test(error.message) ? error.message : 'EPUB 压缩包损坏，无法解压。'); }
   if (Object.keys(files).length > EPUB_LIMITS.entries || Object.values(files).reduce((sum, data) => sum + data.length, 0) > EPUB_LIMITS.unpacked) fail('EPUB 资源超过导入限制。');
   const read = (path: string): string => { const data = files[withoutFragment(path)]; return data ? strFromU8(data) : fail(`EPUB 缺少必要资源：${path}`); };
+  await ensure(['mimetype','META-INF/container.xml','META-INF/encryption.xml']);
   if (!files['META-INF/container.xml']) fail('文件缺少 META-INF/container.xml，不是可识别的 EPUB。');
   if (files.mimetype && strFromU8(files.mimetype).trim() !== 'application/epub+zip') fail('文件内容不是 EPUB 格式。');
   const container = xml(read('META-INF/container.xml'), 'EPUB 容器');
   const opf = elements(container, 'rootfile').find(item => item.getAttribute('media-type') === 'application/oebps-package+xml')?.getAttribute('full-path') ?? elements(container, 'rootfile')[0]?.getAttribute('full-path');
-  if (!opf || !files[opf]) fail('EPUB 缺少有效的 OPF 图书描述。');
+  if (!opf || !zipNames.has(opf)) fail('EPUB 缺少有效的 OPF 图书描述。');
+  await ensure([opf]);
   const packageDoc = xml(read(opf), 'OPF');
   const pkg = packageDoc.documentElement;
   const spineElement = elements(packageDoc, 'spine')[0];
@@ -136,7 +162,8 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
       const algorithm = elements(entry, 'EncryptionMethod')[0]?.getAttribute('Algorithm');
       const uri = elements(entry, 'CipherReference')[0]?.getAttribute('URI') ?? '';
       const path = resolvePackagePath('', uri);
-      if (!path || !files[path]) fail('书籍加密资源描述无效。');
+      if (!path || !zipNames.has(path)) fail('书籍加密资源描述无效。');
+      await ensure([path]);
       const media = mimeByPath.get(path) ?? '';
       if (!/font|opentype|truetype/i.test(media)) fail('该 EPUB 含 DRM 加密内容，当前版本无法打开。');
       let key: Uint8Array;
@@ -151,29 +178,38 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
       const data = files[path].slice();
       for (let i = 0; i < Math.min(data.length, length); i++) data[i] ^= key[i % key.length];
       files[path] = data;
+      fontKeys.set(path,{key,length});
     }
   }
 
   const resourceCache = new Map<string, string>();
+  const resourceBlobs = new Map<string,Blob>();
+  const resourceUsers = new Map<string,Set<number>>();
+  releaseResources=()=>{resourceCache.clear();resourceBlobs.clear();resourceUsers.clear();};
+  let usedResources = new Set<string>();
+  const localResource = (value:string) => safeDataResource(value) || objectUrls.has(withoutFragment(value));
   const activeResources = new Set<string>();
   let expandedCharacters = 0;
   function accountExpansion(length: number) {
     expandedCharacters += length;
     if (expandedCharacters > EPUB_LIMITS.expanded) fail('书籍样式或图片展开后过大，超过安全导入限制。');
   }
-  function resourceUrl(path: string): string | undefined {
+  function resourceUrl(path: string, embedded = false): string | undefined {
     const fragment = path.includes('#') ? path.slice(path.indexOf('#')) : '';
     path = withoutFragment(path);
+    usedResources.add(path);
+    const cacheKey = embedded ? `inline:${path}` : path;
     const data = files[path];
     if (!data) return undefined;
-    if (resourceCache.has(path)) {
-      const cached = resourceCache.get(path)! + fragment;
+    if (resourceCache.has(cacheKey)) {
+      const cached = resourceCache.get(cacheKey)! + fragment;
       accountExpansion(cached.length);
       return cached;
     }
     if (activeResources.has(path)) return undefined;
     activeResources.add(path);
     const media = mimeByPath.get(path) || MIME[path.split('.').pop()?.toLowerCase() ?? ''] || 'application/octet-stream';
+    validateImagePixels(data,media);
     let content = data;
     if (media === 'image/svg+xml') {
       const svgDoc = new DOMParser().parseFromString(strFromU8(data), 'image/svg+xml');
@@ -183,7 +219,7 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
           if (/^on/i.test(attr.name) || attr.name === 'style') element.removeAttribute(attr.name);
           if (/^(?:href|xlink:href)$/i.test(attr.name) && !attr.value.startsWith('#')) {
             const referenced = resolvePackagePath(path, attr.value);
-            const replacement = referenced ? resourceUrl(referenced) : undefined;
+            const replacement = referenced ? resourceUrl(referenced,true) : undefined;
             if (replacement) element.setAttribute(attr.name, replacement); else element.removeAttribute(attr.name);
           }
           if (/url\s*\(/i.test(attr.value) && !/^url\(\s*['"]?#/i.test(attr.value)) element.removeAttribute(attr.name);
@@ -191,10 +227,13 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
       }
       content = new TextEncoder().encode(DOMPurify.sanitize(new XMLSerializer().serializeToString(svgDoc), { USE_PROFILES:{svg:true,svgFilters:true} }));
     }
-    // Charge before allocating a base64 copy, including each cached reference.
-    accountExpansion(media.length + 13 + Math.ceil(content.length / 3) * 4 + fragment.length);
-    const url = `data:${media};base64,${base64(content)}`;
-    resourceCache.set(path, url);
+    // Lazy readers share binary Blob URLs instead of copying image data into every chapter.
+    accountExpansion(archive && !embedded ? content.length : media.length + 13 + Math.ceil(content.length / 3) * 4 + fragment.length);
+    const binary = archive && !embedded ? new Blob([new Uint8Array(content).buffer],{type:media}) : undefined;
+    const url = binary ? URL.createObjectURL(binary) : `data:${media};base64,${base64(content)}`;
+    if (binary) resourceBlobs.set(path,binary);
+    if (archive) objectUrls.add(url);
+    resourceCache.set(cacheKey, url);
     activeResources.delete(path);
     return url + fragment;
   }
@@ -220,7 +259,7 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
     result = result.replace(/(?:expression\s*\([^;]*|behavior\s*:[^;]*|-moz-binding\s*:[^;]*)/gi, '');
     result = result.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (_all, _quote:string, href:string) => {
       if (href.startsWith('#')) return `url("${href.replace(/["\\\n\r]/g, '')}")`;
-      if (safeDataResource(href)) return `url("${href}")`;
+      if (localResource(href)) return `url("${href}")`;
       const path = resolvePackagePath(base, href);
       const url = path ? resourceUrl(path) : undefined;
       if (url) accountStylesheet(url.length);
@@ -251,7 +290,7 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
         const isResource = attr.name.toLowerCase() === 'src' || isHref && element.localName !== 'a';
         if (isResource) {
           if (isHref && attr.value.startsWith('#')) continue;
-          if (safeDataResource(attr.value)) continue;
+          if (localResource(attr.value)) continue;
           const target = resolvePackagePath(path, attr.value);
           const replacement = target ? resourceUrl(target) : undefined;
           if (replacement) element.setAttribute(attr.name, replacement); else element.removeAttribute(attr.name);
@@ -268,6 +307,7 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
     }
     const clean = DOMPurify.sanitize(doc.documentElement.outerHTML, {
       WHOLE_DOCUMENT:true, ADD_TAGS:['style'], ADD_ATTR:['data-epub-href','epub:type'],
+      ALLOWED_URI_REGEXP:/^(?:(?:https?|blob|data):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
       FORBID_TAGS:['script','iframe','object','embed','form','input','button','textarea','select','audio','video','source','track','base','link','meta'],
     });
     const output = new DOMParser().parseFromString(clean, 'text/html');
@@ -278,6 +318,7 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
 
   let toc: TocItem[] = [];
   const navItem = Array.from(manifest.values()).find(item => item.properties.includes('nav'));
+  if (navItem) await ensure([navItem.href]);
   if (navItem && files[navItem.href]) {
     const navDoc = new DOMParser().parseFromString(read(navItem.href), 'text/html');
     const navs = Array.from(navDoc.querySelectorAll('nav'));
@@ -294,6 +335,7 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
   if (!toc.length) {
     const ncxId = spineElement.getAttribute('toc');
     const ncx = (ncxId ? manifest.get(ncxId) : undefined) ?? Array.from(manifest.values()).find(item => item.media === 'application/x-dtbncx+xml');
+    if (ncx) await ensure([ncx.href]);
     if (ncx && files[ncx.href]) {
       try {
         const ncxDoc = xml(read(ncx.href), 'NCX 目录');
@@ -318,9 +360,9 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
     if ((itemRef.getAttribute('properties') ?? '').includes('rendition:layout-pre-paginated')) fail('该书含固定版式章节，当前版本仅支持可重排版图书。');
     const idref = itemRef.getAttribute('idref') ?? '';
     const item = manifest.get(idref);
-    if (!item || !files[item.href]) fail(`图书缺少第 ${index + 1} 节正文资源。`);
+    if (!item || !zipNames.has(item.href)) fail(`图书缺少第 ${index + 1} 节正文资源。`);
     if (!['application/xhtml+xml','text/html'].includes(item.media)) continue;
-    const content = chapterHtml(read(item.href),item.href);
+    const content = archive ? {html:'',title:''} : chapterHtml(read(item.href),item.href);
     const escapedId = idref.replace(/[\[\](),;=^]/g, char => '^'+char);
     chapters.push({id:item.id,href:item.href,title:findLabel(toc,item.href) || content.title || `第 ${chapters.length+1} 节`,cfiBase:`/6/${(index+1)*2}[${escapedId}]`,html:content.html});
   }
@@ -329,13 +371,68 @@ export async function parseEpub(blob: Blob, originalFileName = '未命名.epub')
   const coverId = metas.find(el => el.getAttribute('name') === 'cover')?.getAttribute('content');
   const cover = Array.from(manifest.values()).find(item => item.properties.includes('cover-image')) ?? (coverId ? manifest.get(coverId) : undefined);
   let coverBlob: Blob | undefined;
+  // Load only the local dependency graph needed by this chapter (CSS, images, SVG and fonts).
+  async function preload(path:string, seen = new Set<string>(), depth = 0):Promise<void> {
+    path = withoutFragment(path);
+    if (seen.has(path) || depth > 10 || !zipNames.has(path)) return;
+    seen.add(path); await ensure([path]);
+    const media = mimeByPath.get(path) || MIME[path.split('.').pop()?.toLowerCase() ?? ''];
+    if (!/xml|html|css/.test(media ?? '') || !files[path]) return;
+    const source = read(path);
+    const references = [...source.matchAll(/(?:src|href|xlink:href)\s*=\s*["']([^"']+)["']|url\(\s*["']?([^"')\s]+)|@import\s*["']([^"']+)["']/gi)];
+    for (const match of references) {
+      const target = resolvePackagePath(path,match[1] ?? match[2] ?? match[3]);
+      if (!target || /\.(?:xhtml|html|opf|ncx)(?:#|$)/i.test(target)) continue;
+      await preload(target,seen,depth+1);
+    }
+  }
+  if (cover) await preload(cover.href);
   if (cover && files[cover.href] && cover.media.startsWith('image/')) {
     const url = resourceUrl(cover.href);
     if (url) {
-      const encoded = url.slice(url.indexOf(',')+1);
-      const content = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
-      coverBlob = new Blob([content], {type:cover.media});
+      if (archive) coverBlob = resourceBlobs.get(cover.href);
+      else {
+        const encoded = url.slice(url.indexOf(',')+1);
+        const content = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+        coverBlob = new Blob([content], {type:cover.media});
+      }
     }
   }
-  return {title,author,language,version:pkg.getAttribute('version') ?? '2.0',chapters,toc,coverBlob};
+  let loading = Promise.resolve();
+  function releaseChapter(index:number) {
+    if (!archive) return;
+    chapters[index].html = '';
+    for (const [path,users] of resourceUsers) {
+      users.delete(index);
+      if (!users.size) {
+        const url = resourceCache.get(path); if (url) { URL.revokeObjectURL(url); objectUrls.delete(url); }
+        resourceCache.delete(path); resourceCache.delete(`inline:${path}`); resourceBlobs.delete(path); resourceUsers.delete(path);
+      }
+    }
+  }
+  async function loadChapter(index:number):Promise<Chapter> {
+    const chapter = chapters[index];
+    if (!chapter) fail('章节不存在。');
+    if (!archive || chapter.html) return chapter;
+    const job = loading.then(async()=>{
+      checkCancelled(options.signal);
+      if (chapter.html) return;
+      expandedCharacters = 0; usedResources = new Set();
+      await preload(chapter.href);
+      const content = chapterHtml(read(chapter.href),chapter.href);
+      chapter.html = content.html;
+      if (!findLabel(toc,chapter.href) && content.title) chapter.title = content.title;
+      for (const path of usedResources) {
+        if (!resourceUsers.has(path)) resourceUsers.set(path,new Set());
+        resourceUsers.get(path)!.add(index);
+      }
+      // Binary resources are now shared Blob URLs; don't retain another JS copy.
+      files = {};
+    });
+    loading = job.catch(()=>{}); await job; return chapter;
+  }
+  const result:ParsedBook = {title,author,language,version:pkg.getAttribute('version') ?? '2.0',chapters,toc,coverBlob,...(archive?{dispose,loadChapter,releaseChapter}:{})};
+  if (archive) { options.onStage?.('解析首章'); await loadChapter(0); }
+  return result;
+  } catch (error) { dispose(); throw error; }
 }

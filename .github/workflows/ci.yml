@@ -21,3 +21,7 @@ jobs:
       - run: npm test
       - run: node --test tests/desktop-policy.test.cjs
       - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm run test:e2e
+        env:
+          PLAYWRIGHT_CHANNEL: chromium

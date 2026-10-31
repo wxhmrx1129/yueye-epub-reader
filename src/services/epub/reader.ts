@@ -136,6 +136,10 @@ export class ReaderAdapter {
   private lengths: number[];
   private positionValue?: ReaderPosition;
   private lastSelection: TextSelection | null = null;
+  private renderingChapter = -1;
+  private measuringChapter = -1;
+  private indexWork = Promise.resolve();
+  private pendingLoads = new Set<()=>void>();
   private scrollHandler?: () => void;
 
   constructor(private host: HTMLElement, private book: ParsedBook, preferences: Preferences, private events: ReaderEvents) {
@@ -146,6 +150,7 @@ export class ReaderAdapter {
     this.measure.style.cssText = 'position:fixed;left:-100000px;top:0;visibility:hidden;pointer-events:none;border:0;';
     host.append(this.frame, this.measure);
     this.lengths = book.chapters.map(ch => {
+      if (book.releaseChapter) return 1;
       const doc = new DOMParser().parseFromString(ch.html, 'text/html');
       return Math.max(1, textNodes(doc).reduce((n, t) => n + t.length, 0));
     });
@@ -204,18 +209,27 @@ export class ReaderAdapter {
   }
   private load(frame: HTMLIFrameElement, html: string): Promise<Document> {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { frame.removeEventListener('load', loaded); reject(new Error('正文加载超时，请重试。')); }, 12000);
+      let settled=false,resourceTimer:ReturnType<typeof setTimeout>|undefined;
+      let stopWait!:()=>void;const stopped=new Promise<void>(done=>{stopWait=done;});
+      const finish=(error?:Error,doc?:Document)=>{
+        if(settled)return;settled=true;clearTimeout(timeout);clearTimeout(resourceTimer);stopWait();
+        frame.removeEventListener('load',loaded);this.pendingLoads.delete(cancel);
+        if(error)reject(error);else resolve(doc!);
+      };
+      const cancel=()=>finish(new Error('阅读已关闭'));
+      const timeout = setTimeout(() => finish(new Error('正文加载超时，请重试。')), 12000);
       const loaded = async () => {
-        clearTimeout(timeout);
-        if (this.destroyed) { reject(new Error('阅读已关闭')); return; }
+        if (this.destroyed) { cancel(); return; }
         const doc = frame.contentDocument;
-        if (!doc?.body) { reject(new Error('无法加载书籍正文。')); return; }
+        if (!doc?.body) { finish(new Error('无法加载书籍正文。')); return; }
         await Promise.race([Promise.all([
           doc.fonts?.ready,
           ...Array.from(doc.images).filter(img=>!img.complete).map(img=>new Promise<void>(r=>{img.onload=()=>r();img.onerror=()=>r();})),
-        ]),new Promise(r=>setTimeout(r,2500))]);
-        await pause(); resolve(doc);
+        ]),new Promise(r=>{resourceTimer=setTimeout(r,2500);}),stopped]);
+        if(settled)return;
+        await pause(); finish(undefined,doc);
       };
+      this.pendingLoads.add(cancel);
       frame.addEventListener('load', loaded, {once:true}); frame.srcdoc = html;
     });
   }
@@ -252,14 +266,25 @@ export class ReaderAdapter {
     this.emitPosition();
   }
   private async renderChapter(index: number, cfi?: string, quote?: string, last = false) {
+    this.renderingChapter=index;
+    try {
+    await this.book.loadChapter?.(index);
+    if (this.destroyed) return;
+    const previous = this.chapter;
     const doc = await this.load(this.frame, this.html(this.book.chapters[index]));
     if (this.destroyed) return;
     this.chapter=index; this.localPage=0;
+    if (previous !== index && previous !== this.measuringChapter) this.book.releaseChapter?.(previous);
     this.bind(doc); this.paintAnnotations();
     if(cfi) this.locate(doc,cfi,quote);
     else if(last) this.scroll(this.preferences.readingMode==='paginated'?this.pageCount(doc)-1:doc.documentElement.scrollHeight);
     else this.scroll(0);
     this.emitPosition();
+    } finally {this.renderingChapter=-1;this.releaseIdleChapters();}
+  }
+  private releaseIdleChapters() {
+    if(!this.book.releaseChapter)return;
+    this.book.chapters.forEach((chapter,index)=>{if(chapter.html&&index!==this.chapter&&index!==this.renderingChapter&&index!==this.measuringChapter)this.book.releaseChapter!(index);});
   }
   private locate(doc: Document, target: string, quote?: string) {
     let range:Range|undefined;
@@ -301,6 +326,14 @@ export class ReaderAdapter {
     });
   }
   async goToProgress(progression:number) { return this.enqueue(async()=>{
+    if (this.book.releaseChapter) {
+      const target = Math.min(this.book.chapters.length - .00001,Math.max(0,progression * this.book.chapters.length));
+      const index = Math.floor(target);
+      if (index !== this.chapter) await this.renderChapter(index);
+      const doc = this.frame.contentDocument!;
+      const length = textNodes(doc).reduce((sum,node)=>sum+node.length,0);
+      this.showRange(atOffset(doc,Math.floor((target-index)*length))); this.emitPosition(); return;
+    }
     const total=this.lengths.reduce((a,b)=>a+b,0),target=Math.min(total-1,Math.max(0,Math.round(total*progression)));
     let offset=target,index=0;while(index<this.lengths.length-1&&offset>=this.lengths[index])offset-=this.lengths[index++];
     if(index!==this.chapter)await this.renderChapter(index);
@@ -327,6 +360,11 @@ export class ReaderAdapter {
   }
   private async buildIndex() {
     const revision=++this.revision;
+    const previous=this.indexWork;let finish!:()=>void;
+    this.indexWork=new Promise<void>(resolve=>{finish=resolve;});
+    await previous;
+    try {
+    if(this.destroyed||revision!==this.revision)return;
     if(this.preferences.readingMode==='scrolled'){this.pages=[];this.events.index(null,0,0);return;}
     const signature=JSON.stringify(['columns-v2',this.width,this.height,this.preferences.fontSize,this.preferences.fontFamily,this.preferences.lineHeight,navigator.userAgent]);
     const cache=await this.events.loadIndex?.(signature).catch(()=>undefined);
@@ -336,6 +374,9 @@ export class ReaderAdapter {
     try {
       for(let chapter=0;chapter<this.book.chapters.length;chapter++){
         if(this.destroyed||revision!==this.revision)return;
+        this.measuringChapter=chapter;
+        await this.book.loadChapter?.(chapter);
+        if(this.destroyed||revision!==this.revision)return;
         const doc=await this.load(this.measure,this.html(this.book.chapters[chapter],true));
         if(this.destroyed||revision!==this.revision)return;
         const count=this.pageCount(doc);
@@ -343,12 +384,14 @@ export class ReaderAdapter {
           pages.push({chapter,localPage,cfi:cfiFor(pointRange(doc,localPage*this.width,'x'),this.book.chapters[chapter])});
           if(localPage%20===19){await pause();if(this.destroyed||revision!==this.revision)return;}
         }
+        this.measuringChapter=-1;this.releaseIdleChapters();
         this.events.index(null,chapter+1,this.book.chapters.length);await pause();
       }
       if(this.destroyed||revision!==this.revision)return;
       this.pages=pages;this.events.index(pages,this.book.chapters.length,this.book.chapters.length);this.emitPosition();
       void this.events.saveIndex?.(signature,pages).catch(()=>{});
     }catch(error){if(!this.destroyed&&revision===this.revision)this.events.error(error instanceof Error?error.message:'页码计算失败，请调整设置后重试。');}
+    } finally {this.measuringChapter=-1;this.releaseIdleChapters();finish();}
   }
   private emitPosition() {
     const doc=this.frame.contentDocument;if(!doc?.body||this.destroyed)return;
@@ -360,7 +403,8 @@ export class ReaderAdapter {
     const quoteContext=node.nodeType===Node.TEXT_NODE?(node.textContent??'').slice(range.startOffset,range.startOffset+80):'';
     const count=this.lengths.reduce((a,b)=>a+b,0);
     const done=this.chapter===this.book.chapters.length-1&&(paginated?this.localPage===this.pageCount(doc)-1:win.scrollY+this.height>=doc.documentElement.scrollHeight-4);
-    const progression=done?1:Math.min(.9999,(this.lengths.slice(0,this.chapter).reduce((a,b)=>a+b,0)+textOffset(doc,range))/count);
+    const within = textOffset(doc,range) / Math.max(1,textNodes(doc).reduce((sum,node)=>sum+node.length,0));
+    const progression=done?1:Math.min(.9999,this.book.releaseChapter ? (this.chapter+within)/this.book.chapters.length : (this.lengths.slice(0,this.chapter).reduce((a,b)=>a+b,0)+textOffset(doc,range))/count);
     const page=this.pages.findIndex(p=>p.chapter===this.chapter&&p.localPage===this.localPage)+1;
     this.positionValue={cfi:cfiFor(range,this.book.chapters[this.chapter]),href:this.book.chapters[this.chapter].href,spineIndex:this.chapter,progression,quoteContext,chapterTitle:this.book.chapters[this.chapter].title,isFinished:done,page,totalPages:this.pages.length};
     this.events.position(this.positionValue);
@@ -417,5 +461,5 @@ export class ReaderAdapter {
     }
     doc.head.append(style);
   }
-  destroy(){this.destroyed=true;this.revision++;clearTimeout(this.resizeTimer);clearTimeout(this.scrollTimer);this.observer.disconnect();this.frame.remove();this.measure.remove();}
+  destroy(){this.destroyed=true;this.revision++;for(const cancel of this.pendingLoads)cancel();this.pendingLoads.clear();clearTimeout(this.resizeTimer);clearTimeout(this.scrollTimer);this.observer.disconnect();this.frame.remove();this.measure.remove();}
 }

@@ -1,10 +1,12 @@
-# 阅野 · EPUB 阅读器
+# 阅野 · EPUB / PDF 阅读器
 
-阅野是一个无需登录、在本机保存图书和阅读记录的 EPUB 阅读器，支持 Windows 桌面客户端和网页运行。
+阅野是一个无需登录、在本机保存图书和阅读记录的 EPUB / PDF 阅读器，支持 Windows 桌面客户端和网页运行。
 
 ## 功能
 
 - 本地书架：批量导入、拖放、封面、搜索、排序、重复识别和继续阅读。
+- V1.1：EPUB / PDF 单本最高 150MiB（157,286,400 字节），支持混合导入、阶段提示及取消。
+- PDF：原始版面、单页翻阅、页码跳转、50%—300% 缩放、适合宽度/页面、大纲、文本选择、页面书签及进度恢复；扫描页按图像显示。
 - 支持常见的无 DRM、横排可重排 EPUB 2 / 3，以及多级目录和书内链接。
 - 真实分页、全书页码跳转、纵向滚动和阅读进度恢复。
 - 多种主题、字号、字体、内容宽度、行间距与全屏阅读。
@@ -15,11 +17,11 @@
 
 支持 Windows 10 / 11 x64。
 
-**[下载 Windows 安装包 · v1.0.0](https://github.com/wxhmrx1129/yueye-epub-reader/releases/download/v1.0.0/YueyeReader-Setup-1.0.0-x64.exe)**
+**[下载 Windows 安装包 · v1.1.0](https://github.com/wxhmrx1129/yueye-epub-reader/releases/download/v1.1.0/YueyeReader-Setup-1.1.0-x64.exe)**
 
-下载后双击 `YueyeReader-Setup-1.0.0-x64.exe`，按向导选择安装位置。安装完成后，通过桌面或开始菜单的「阅野」快捷方式启动。用户无需安装 Node.js、Git 或构建环境。
+下载后双击 `YueyeReader-Setup-1.1.0-x64.exe`，按向导选择安装位置。安装完成后，通过桌面或开始菜单的「阅野」快捷方式启动。用户无需安装 Node.js、Git 或构建环境。
 
-[版本说明与 SHA-256 校验文件](https://github.com/wxhmrx1129/yueye-epub-reader/releases/tag/v1.0.0) · [查看最新版本](https://github.com/wxhmrx1129/yueye-epub-reader/releases/latest)
+[版本说明与 SHA-256 校验文件](https://github.com/wxhmrx1129/yueye-epub-reader/releases/tag/v1.1.0) · [查看最新版本](https://github.com/wxhmrx1129/yueye-epub-reader/releases/latest)
 
 当前安装包尚未配置代码签名，Windows 可能显示「未知发布者」。
 
@@ -27,7 +29,7 @@
 
 ## 从源码运行
 
-需要 Node.js 22.12+（推荐 Node.js 24 LTS）、npm，以及首次下载依赖时的网络连接。
+需要 Node.js 22.13+ 或 24+（推荐 Node.js 24 LTS）、npm，以及首次下载依赖时的网络连接。
 
 ```powershell
 git clone https://github.com/wxhmrx1129/yueye-epub-reader.git
@@ -42,7 +44,7 @@ npm run desktop
 npm run desktop:dist
 ```
 
-安装包输出到 `release/`，例如 `release/YueyeReader-Setup-1.0.0-x64.exe`。`release/win-unpacked/` 是完整目录版，不能仅复制其中的单个 EXE 使用。
+安装包输出到 `release/`，例如 `release/YueyeReader-Setup-1.1.0-x64.exe`。`release/win-unpacked/` 是完整目录版，不能仅复制其中的单个 EXE 使用。
 
 | 命令 | 用途 |
 | --- | --- |
@@ -58,28 +60,30 @@ npm run desktop:dist
 
 ## 开始阅读
 
-1. 在书架点击导入按钮，选择一个或多个 `.epub` 文件，也可以将文件拖入书架。
+1. 在书架点击导入按钮，选择一个或多个 `.epub` / `.pdf` 文件，也可以将文件拖入书架。
 2. 点击书籍打开阅读；首次使用可点击「先读一本示例书」。
 3. 使用目录、前后页按钮、左右方向键或 PageUp / PageDown 翻页。
-4. 在阅读设置中调整排版；选中文字后可添加高亮或笔记。
+4. EPUB 可调整排版并添加文字高亮或笔记；PDF 保留原页面，使用缩放和页面书签。
 5. 阅读进度自动保存。正常关闭客户端时，会等待已经提交的本地写入完成。
 
-字号和正文宽度的数字输入在按 Enter 或离开输入框时生效。全书页码随窗口、字体和排版变化，不对应纸书页码。滚动阅读每次展示一个章节，通过前后章节按钮换章。
+EPUB 字号和正文宽度的数字输入在按 Enter 或离开输入框时生效。EPUB 全书页码随窗口、字体和排版变化，计算中可先阅读当前章节；滚动阅读每次展示一个章节。PDF 按文件实际页面顺序从 1 计数，与印刷页码标签可能不同。PDF 应用主题改变界面及页面周围背景，不修改原页面颜色或字体。
 
 ## 本地数据
 
 Windows 客户端数据保存在 `%APPDATA%\YueyeReader`，默认卸载保留。备份前请完全退出客户端，再复制整个数据目录。
 
-网页版的数据保存在当前浏览器的当前站点地址中。不同浏览器、地址、端口，以及桌面客户端使用独立书架，数据不会自动互通。转用客户端时需要重新导入 EPUB，原浏览器中的阅读进度、书签和笔记不会自动迁入。
+网页版的数据保存在当前浏览器的当前站点地址中。不同浏览器、地址、端口，以及桌面客户端使用独立书架，数据不会自动互通。转用客户端时需要重新导入图书，原浏览器中的阅读进度、书签和笔记不会自动迁入。
 
 图书和记录不会自动上传。清除数据目录或浏览器站点数据会清除相应记录；目前没有云同步及应用内导出、恢复功能。
 
 ## 格式与限制
 
-- 不支持 PDF、TXT、MOBI、DRM、固定版式、RTL 阅读方向和竖排 EPUB。
+- 不支持 TXT、MOBI、DRM、固定版式、RTL 阅读方向、竖排、ZIP64 或分卷 EPUB。
+- PDF V1.1 不含 OCR、需要打开密码的文件、全文搜索、编辑、选区高亮、笔记、表单填写、打印、连续滚动和旋转。复制文字需文件具有文本层且权限允许；扫描页不会自动识别文字。
 - 不执行书内 JavaScript，不加载书内远程图片、字体或样式，不支持音视频和交互式 EPUB。
 - `linear="no"` 的独立辅助章节暂不参与阅读，指向这类文件的脚注可能无法打开。
-- 单个原文件上限为 50 MiB，ZIP 解压总量上限为 250 MiB，单项上限为 50 MiB，最多 10,000 项。
+- EPUB / PDF 单个原文件上限为 150MiB；EPUB ZIP 声明解压总量上限 750MiB、单项 50MiB、最多 10,000 项、展开样式 16MiB、单张可识别栅格图片 32 兆像素。文件在容量上限内仍需符合结构及资源安全限制。
+- EPUB 按需解压当前章节和所需资源，关闭时回收。PDF 仅渲染当前页，画布目标不超过 16 兆像素；大页面会降低渲染分辨率并提示。PDF 嵌入图片超过 32 兆像素可能不显示。
 - 复杂公式、特殊字体、超宽表格及超大图书可能存在兼容性或性能问题。
 
 网页版优先使用新版 Edge 或 Chrome，需要 IndexedDB、Web Locks、CSS Custom Highlight 和 Fullscreen API。
@@ -92,11 +96,12 @@ node --test tests/desktop-policy.test.cjs
 npm run build
 npm run test:e2e
 npm run test:desktop
+node scripts/test-v11-desktop.mjs
 ```
 
 浏览器集成测试默认使用本机安装的 Microsoft Edge。如使用 Chrome，先在 PowerShell 中设置 `$env:PLAYWRIGHT_CHANNEL='chrome'`。桌面测试使用独立临时数据目录，不访问日常书架。
 
-React、TypeScript、Vite 和 Electron 提供应用与桌面打包；fflate 处理压缩包，DOMPurify 清理书内内容，Dexie 管理本地数据库，epub.js 提供 CFI 定位。
+React、TypeScript、Vite 和 Electron 提供应用与桌面打包；fflate 处理压缩包，DOMPurify 清理书内内容，Dexie 管理本地数据库，epub.js 提供 CFI 定位，PDF.js 提供 PDF 渲染。构建及开发启动前自动准备 PDF 离线资源；需要保留完整 `dist/`，包括 `pdfjs/` 目录。首次集成测试会在本机生成大文件样本，保存在被 Git 忽略的 `.local-v11-fixtures/` 中。
 
 内置示例书《把日子读成诗》及测试图书由本项目生成，正文、封面与插画为原创样本。运行 `node scripts/create-fixtures.mjs` 可重新生成。
 
@@ -104,4 +109,4 @@ React、TypeScript、Vite 和 Electron 提供应用与桌面打包；fflate 处�
 
 ## 许可证
 
-项目采用 [MIT License](LICENSE)。第三方依赖遵循各自的许可证。
+项目采用 [MIT License](LICENSE)。第三方依赖遵循各自的许可证；PDF.js 使用 Apache-2.0，PDF 离线资源中的许可证随应用一起打包，发行时应完整保留。
