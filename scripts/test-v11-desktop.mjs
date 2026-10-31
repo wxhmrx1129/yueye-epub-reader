@@ -43,8 +43,8 @@ try{
   await page.getByLabel('PDF 缩放',{exact:true}).selectOption('3');await expect(page.locator('.pdf-loading')).toHaveCount(0);
   await page.getByLabel('PDF 阅读区域',{exact:true}).evaluate(area=>{area.scrollTop=(area.scrollHeight-area.clientHeight)*.7;area.dispatchEvent(new Event('scroll'));});
   await page.getByRole('button',{name:'添加或移除页面书签',exact:true}).click();
-  await page.getByRole('button',{name:'全屏阅读',exact:true}).click();await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
-  await page.getByRole('button',{name:'全屏阅读',exact:true}).click();
+  await page.getByRole('button',{name:'进入全屏',exact:true}).click();await expect.poll(()=>page.evaluate(()=>!!document.fullscreenElement)).toBe(true);
+  await page.getByRole('button',{name:'退出全屏',exact:true}).click();
   await page.getByLabel('PDF 页码',{exact:true}).fill('2');await page.getByRole('button',{name:'跳转',exact:true}).click();await expect(page.getByLabel('PDF 第 2 页',{exact:true})).toBeVisible();
   // Close before the debounced progress save; the close barrier must flush the last page.
   await close();await launch();await page.getByRole('button',{name:'打开《Offline PDF sample》',exact:true}).click();

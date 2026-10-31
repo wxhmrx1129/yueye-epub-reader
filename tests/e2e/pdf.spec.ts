@@ -19,7 +19,8 @@ test('PDF 导入、渲染、目录、缩放、书签和刷新续读',async({page
   await expect(page.locator('.pdf-save')).toContainText('已保存');
   await page.getByRole('button',{name:'返回书架',exact:true}).click();await open.click();
   await expect(page.getByLabel('PDF 第 2 页',{exact:true})).toBeVisible();await expect(page.getByLabel('PDF 缩放',{exact:true})).toHaveValue('1.5');
-  await page.getByRole('button',{name:'目录',exact:true}).click();await page.getByRole('button',{name:'Last page',exact:true}).click();
+  if(await page.getByRole('button',{name:'目录',exact:true}).getAttribute('aria-pressed')!=='true')await page.getByRole('button',{name:'目录',exact:true}).click();
+  await page.getByRole('button',{name:'Last page',exact:true}).click();
   await expect(page.getByLabel('PDF 第 3 页',{exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'下一页',exact:true})).toBeDisabled();
   await expect(page.locator('.pdf-save')).toContainText('已保存');

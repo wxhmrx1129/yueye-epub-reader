@@ -7,7 +7,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { db, getBookFile, getPdfProgress, getProgress, importBook, listAnnotations, listBooks, listBookmarks, listPdfBookmarks, putPdfBookmark, removeBook, savePdfProgress } from '../src/services/storage';
 import { FILE_LIMIT, checkCancelled, safeHttpUrl, validateFileSize } from '../src/services/tasks';
 import { EPUB_LIMITS, parseEpub } from '../src/services/epub/import';
-import type { BookRecord, PdfProgress } from '../src/types';
+import type { BookRecord, PdfProgress, PdfAnnotation } from '../src/types';
+import { deletePdfAnnotation, getPdfPreferences, getPreferences, listPdfAnnotations, putPdfAnnotation, savePdfPreferences, savePreferences } from '../src/services/storage';
+import { DEFAULT_PREFERENCES } from '../src/preferences';
 import { validateImagePixels } from '../src/services/epub/image-limits';
 
 beforeAll(()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('Blob',NodeBlob);vi.stubGlobal('File',NodeFile);});
@@ -51,6 +53,37 @@ describe('V1.1 limits and cancellation',()=>{
 });
 
 describe('V1.0 migration and PDF data isolation',()=>{
+  it('upgrades v2 and keeps existing EPUB and PDF records and bookmarks unchanged',async()=>{
+    await db.delete();const previous=new Dexie('yueye-reader');
+    previous.version(2).stores({books:'id,&fileHash,lastReadAt,importedAt,title,format',bookFiles:'bookId',readingProgress:'bookId',bookmarks:'id,bookId,[bookId+cfi]',annotations:'id,bookId,updatedAt',preferences:'id',readerIndexes:'id,bookId,&[bookId+signature]',pdfProgress:'bookId',pdfBookmarks:'id,bookId,&[bookId+page]'});
+    await previous.open();
+    const epub={id:'old-epub',format:'epub',fileHash:'old-epub-hash'},pdf={id:'old-pdf',format:'pdf',fileHash:'old-pdf-hash'};
+    const progress={bookId:'old-pdf',page:3,offsetY:.6,zoom:1.5},bookmark={id:'saved-page',bookId:'old-pdf',page:3};
+    await previous.table('books').bulkAdd([epub,pdf]);await previous.table('pdfProgress').add(progress);await previous.table('pdfBookmarks').add(bookmark);
+    await previous.table('annotations').add({id:'old-note',bookId:'old-epub',note:'kept'});await previous.table('preferences').add({...DEFAULT_PREFERENCES,fontSize:28});previous.close();
+    await db.open();expect(await db.books.get(epub.id)).toEqual(epub);expect(await db.books.get(pdf.id)).toEqual(pdf);
+    expect(await getPdfProgress(pdf.id)).toEqual(progress);expect(await listPdfBookmarks(pdf.id)).toEqual([bookmark]);
+    expect((await listAnnotations(epub.id))[0].note).toBe('kept');expect((await getPreferences()).fontSize).toBe(28);expect(await listPdfAnnotations(pdf.id)).toEqual([]);
+  });
+  it('stores PDF preferences separately from EPUB and normalizes only PDF settings',async()=>{
+    const epub={...DEFAULT_PREFERENCES,fontSize:28,theme:'sand' as const};await savePreferences(epub);
+    const seed=await getPdfPreferences(epub);expect(seed).toMatchObject({...epub,viewMode:'original'});
+    await savePdfPreferences({...seed,fontSize:40,theme:'night',readingMode:'scrolled',viewMode:'text'});
+    expect(await getPreferences()).toEqual(epub);expect(await getPdfPreferences()).toMatchObject({fontSize:40,theme:'night',readingMode:'scrolled',viewMode:'text'});
+    await savePdfPreferences({...seed,fontSize:200,contentWidth:10});expect(await getPdfPreferences()).toMatchObject({fontSize:40,contentWidth:480});
+    expect(await getPreferences()).toEqual(epub);
+  });
+  it('persists, edits and deletes text and region notes and removes only their book data',async()=>{
+    const book={id:'pdf',format:'pdf',pageCount:3,fileHash:'annotation-test'} as BookRecord;await db.books.add(book);
+    const note:PdfAnnotation={id:'text',bookId:book.id,page:2,kind:'text',start:0,end:5,quote:'hello',prefix:'',suffix:' world',rects:[{x:.1,y:.2,width:.3,height:.04}],note:'thought',color:'#e8c96d',createdAt:1,updatedAt:1};
+    await putPdfAnnotation(note);await putPdfAnnotation({...note,note:'edited',color:'#a9cba0',updatedAt:2});
+    const region:PdfAnnotation={...note,id:'region',kind:'region',start:0,end:0,quote:'第 2 页的框选区域'};await putPdfAnnotation(region);
+    expect(await listPdfAnnotations(book.id)).toHaveLength(2);expect((await db.pdfAnnotations.get(note.id))?.note).toBe('edited');
+    for(const invalid of [{...note,page:4},{...note,start:-1},{...note,color:'bad'},{...note,note:'a'.repeat(20001)},{...note,rects:[{x:.9,y:0,width:.2,height:.1}]}])await expect(putPdfAnnotation(invalid)).rejects.toThrow();
+    await deletePdfAnnotation(note.id);expect(await listPdfAnnotations(book.id)).toEqual([region]);await putPdfAnnotation(note);
+    await db.annotations.put({id:'epub-note',bookId:'epub',note:'kept'} as never);await removeBook(book.id);
+    expect(await listPdfAnnotations(book.id)).toEqual([]);expect((await listAnnotations('epub'))[0].note).toBe('kept');await expect(putPdfAnnotation(note)).rejects.toThrow('已被移除');
+  });
   it('upgrades schema v1 without changing old files, CFI, notes or settings',async()=>{
     await db.delete();
     const legacy=new Dexie('yueye-reader');

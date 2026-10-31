@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { DEFAULT_PREFERENCES, normalizePreferences } from '../preferences';
-import type { Annotation, BookRecord, Bookmark, PageIndex, Preferences, ReadingProgress, PdfProgress, PdfBookmark } from '../types';
+import type { Annotation, BookRecord, Bookmark, PageIndex, Preferences, ReadingProgress, PdfProgress, PdfBookmark, PdfAnnotation, PdfPreferences } from '../types';
 import { parseEpub, readBlobBytes } from './epub/import';
 import { checkCancelled, validateFileSize, type TaskOptions } from './tasks';
 
@@ -15,6 +15,8 @@ class ReaderDatabase extends Dexie {
   readerIndexes!: Table<PageIndex,string>;
   pdfProgress!: Table<PdfProgress,string>;
   pdfBookmarks!: Table<PdfBookmark,string>;
+  pdfAnnotations!: Table<PdfAnnotation,string>;
+  pdfPreferences!: Table<PdfPreferences,string>;
   constructor() {
     super('yueye-reader');
     this.version(1).stores({
@@ -27,6 +29,7 @@ class ReaderDatabase extends Dexie {
       books:'id,&fileHash,lastReadAt,importedAt,title,format',
       pdfProgress:'bookId', pdfBookmarks:'id,bookId,&[bookId+page]',
     }).upgrade(transaction=>transaction.table('books').toCollection().modify(book=>{book.format??='epub';}));
+    this.version(3).stores({pdfAnnotations:'id,bookId,page,[bookId+page],updatedAt',pdfPreferences:'id'});
   }
 }
 export const db = new ReaderDatabase();
@@ -80,12 +83,13 @@ export async function importBook(file:File, options:TaskOptions = {}):Promise<{b
   } finally { await parsed.dispose?.(); }
 }
 export async function removeBook(id:string) {
-  await db.transaction('rw',[db.books,db.bookFiles,db.readingProgress,db.bookmarks,db.annotations,db.readerIndexes,db.pdfProgress,db.pdfBookmarks],async()=>{
+  await db.transaction('rw',[db.books,db.bookFiles,db.readingProgress,db.bookmarks,db.annotations,db.readerIndexes,db.pdfProgress,db.pdfBookmarks,db.pdfAnnotations],async()=>{
     await db.books.delete(id); await db.bookFiles.delete(id); await db.readingProgress.delete(id);
     await db.bookmarks.where('bookId').equals(id).delete();
     await db.annotations.where('bookId').equals(id).delete();
     await db.readerIndexes.where('bookId').equals(id).delete();
     await db.pdfProgress.delete(id); await db.pdfBookmarks.where('bookId').equals(id).delete();
+    await db.pdfAnnotations.where('bookId').equals(id).delete();
   });
 }
 export function getPdfProgress(id:string) { return db.pdfProgress.get(id); }
@@ -108,6 +112,26 @@ export async function putPdfBookmark(mark:PdfBookmark) {
   });
 }
 export async function deletePdfBookmark(id:string) { await db.pdfBookmarks.delete(id); }
+export async function getPdfPreferences(seed:Preferences=DEFAULT_PREFERENCES):Promise<PdfPreferences> {
+  const saved=await db.pdfPreferences.get('global');
+  return {...normalizePreferences(saved??seed),viewMode:saved?.viewMode==='text'?'text':'original'};
+}
+export async function savePdfPreferences(value:PdfPreferences) {
+  await db.pdfPreferences.put({...normalizePreferences(value),viewMode:value.viewMode==='text'?'text':'original'});
+}
+export async function listPdfAnnotations(bookId:string) { return db.pdfAnnotations.where('bookId').equals(bookId).sortBy('createdAt'); }
+export async function putPdfAnnotation(note:PdfAnnotation) {
+  await db.transaction('rw',db.books,db.pdfAnnotations,async()=>{
+    const book=await db.books.get(note.bookId);
+    if(!book||book.format!=='pdf')throw new Error('PDF 图书已被移除，无法保存笔记。');
+    if(!Number.isInteger(note.page)||note.page<1||book.pageCount&&note.page>book.pageCount)throw new Error('笔记页码超出 PDF 范围。');
+    if(!['text','region'].includes(note.kind)||!Number.isInteger(note.start)||!Number.isInteger(note.end)||note.start<0||note.end<note.start||note.kind==='text'&&note.end===note.start)throw new Error('笔记选区无效，请重新选择。');
+    if(!/^#[0-9a-f]{6}$/i.test(note.color)||note.note.length>20000||note.quote.length>100000)throw new Error('笔记内容或颜色无效。');
+    if(!note.rects.length||note.rects.some(rect=>![rect.x,rect.y,rect.width,rect.height].every(Number.isFinite)||rect.x<0||rect.y<0||rect.width<=0||rect.height<=0||rect.x+rect.width>1.001||rect.y+rect.height>1.001))throw new Error('笔记区域无效，请重新选择。');
+    await db.pdfAnnotations.put(note);
+  });
+}
+export async function deletePdfAnnotation(id:string) { await db.pdfAnnotations.delete(id); }
 export function getProgress(id:string) { return db.readingProgress.get(id); }
 export async function saveProgress(progress:ReadingProgress) {
   await db.transaction('rw',db.books,db.readingProgress,async()=>{

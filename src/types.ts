@@ -48,3 +48,11 @@ export interface PdfProgress {
   progression: number; chapterTitle: string; isFinished: boolean; updatedAt: number;
 }
 export interface PdfBookmark { id: string; bookId: string; page: number; createdAt: number }
+export interface PdfRect { x:number; y:number; width:number; height:number }
+export interface PdfAnnotation {
+  id:string; bookId:string; page:number; kind:'text'|'region';
+  start:number; end:number; quote:string; prefix:string; suffix:string;
+  rects:PdfRect[]; note:string; color:string; createdAt:number; updatedAt:number;
+}
+export interface PdfSelection extends Pick<PdfAnnotation,'page'|'kind'|'start'|'end'|'quote'|'prefix'|'suffix'|'rects'> { x:number; y:number }
+export interface PdfPreferences extends Preferences { viewMode:'original'|'text' }
