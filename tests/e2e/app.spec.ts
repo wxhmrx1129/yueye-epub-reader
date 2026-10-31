@@ -32,6 +32,26 @@ async function persisted(page: Page) {
 
 test('完整界面：目录、设置、书签、笔记、刷新续读和移除图书', async ({ page }) => {
   await importAndOpen(page);
+  await page.evaluate(async () => {
+    const readerPath = '/src/services/epub/reader.ts';
+    const {ReaderAdapter} = await import(readerPath);
+    const trace: unknown[] = [];
+    Reflect.set(window, '__pageJumpTrace', trace);
+    const snapshot = (reader: Record<string, any>) => {
+      const doc = reader.frame.contentDocument;
+      return {chapter:reader.chapter,localPage:reader.localPage,width:reader.width,height:reader.height,revision:reader.revision,pages:reader.pages.map(({chapter,localPage}:any)=>({chapter,localPage})),position:reader.position,preferences:reader.preferences,scrollX:reader.frame.contentWindow.scrollX,scrollWidth:doc?.documentElement.scrollWidth,bodyWidth:doc?.body.getBoundingClientRect().width,active:document.activeElement?.outerHTML.slice(0,200),selection:doc?.getSelection()?.toString(),style:doc?.querySelector('style[data-reader="layout"]')?.textContent};
+    };
+    for(const name of ['goToPage','scheduleLayout','renderChapter','scroll']){
+      const original=Reflect.get(ReaderAdapter.prototype,name);
+      Reflect.set(ReaderAdapter.prototype,name,function(this:Record<string,any>,...args:unknown[]){
+        trace.push({name,args,phase:'before',state:snapshot(this)});
+        const result=original.apply(this,args);
+        if(result instanceof Promise)void result.then(()=>trace.push({name,phase:'after',state:snapshot(this)}),()=>{});
+        else trace.push({name,phase:'after',state:snapshot(this)});
+        return result;
+      });
+    }
+  });
   await expect(page.getByRole('button', { name: '木桌上的一道划痕', exact: true })).toBeVisible();
   await page.getByRole('button', { name: `折叠${firstChapter}`, exact: true }).click();
   await expect(page.getByRole('button', { name: '木桌上的一道划痕', exact: true })).toHaveCount(0);
@@ -78,7 +98,8 @@ test('完整界面：目录、设置、书签、笔记、刷新续读和移除�
 
   await page.getByLabel('跳转页码', { exact: true }).fill('5');
   await page.getByLabel('跳转页码', { exact: true }).press('Enter');
-  await expect(page.getByLabel('跳转页码', { exact: true })).toHaveValue('5');
+  try { await expect(page.getByLabel('跳转页码', { exact: true })).toHaveValue('5'); }
+  catch(error){console.log('Page jump diagnostics:',JSON.stringify(await page.evaluate(()=>Reflect.get(window,'__pageJumpTrace'))));throw error;}
   await expect(page.locator('.reader-save-info')).toContainText('已保存');
   const before = await persisted(page);
   expect(before.notes).toHaveLength(1);
